@@ -429,6 +429,43 @@ $('btnCopyMail').addEventListener('click', async () => {
   }, 1600);
 });
 
+/* ---------- 主题 ---------- */
+
+const THEME_KEY = 'git-live-theme';
+
+function applyTheme(theme) {
+  const dark = theme === 'dark';
+  const toggle = $('themeToggle');
+
+  if (dark) document.documentElement.setAttribute('data-theme', 'dark');
+  else document.documentElement.removeAttribute('data-theme');
+
+  const label = dark ? '切换到浅色主题' : '切换到深色主题';
+  toggle.title = label;
+  toggle.setAttribute('aria-label', label);
+  toggle.setAttribute('aria-pressed', String(dark));
+}
+
+function storedTheme() {
+  try {
+    return localStorage.getItem(THEME_KEY) === 'dark' ? 'dark' : 'light';
+  } catch {
+    return 'light';
+  }
+}
+
+$('themeToggle').addEventListener('click', () => {
+  const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  try {
+    localStorage.setItem(THEME_KEY, next);
+  } catch {
+    // 隐私模式下 localStorage 可能不可用，主题只在本次会话生效
+  }
+  applyTheme(next);
+});
+
+applyTheme(storedTheme());
+
 $('autoToggle').addEventListener('change', (event) => {
   state.auto = event.target.checked;
   updateHeader();

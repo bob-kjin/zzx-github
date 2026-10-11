@@ -1,9 +1,24 @@
 :root {
+  color-scheme: light;
+
   --bg: #f2f2ed;
   --surface: #ffffff;
   --line-light: #e4e4dc;
   --ink-light: #3a3d33;
   --muted-light: #8f9289;
+  --hover: #f4f4ee;
+  --hover-soft: #f3f3ed;
+  --row-ink: #45483d;
+  --icon-idle: #a9ada1;
+  --icon-folder: #b0a86a;
+  --tag-bg: #eef4e0;
+  --tag-ink: #6d8340;
+  --thumb: #d8d8d0;
+  --input-focus: #b6c894;
+  --overlay: rgba(24, 26, 18, 0.45);
+  --foot: #fafaf6;
+  --spotlight: #eef4e0;
+
   --panel: #23261e;
   --panel-soft: rgba(255, 255, 255, 0.045);
   --panel-line: rgba(255, 255, 255, 0.08);
@@ -13,6 +28,29 @@
   --amber: #e0a35a;
   --red: #e07a6a;
   --mono: ui-monospace, "Cascadia Mono", Consolas, "Courier New", monospace;
+}
+
+/* 深色主题：只覆盖界面外壳，右侧 Git 面板本身已是深色 */
+html[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #14160f;
+  --surface: #1e2118;
+  --line-light: #2e3227;
+  --ink-light: #dfe2d5;
+  --muted-light: #8b9080;
+  --hover: #262a1f;
+  --hover-soft: #23271c;
+  --row-ink: #cfd3c4;
+  --icon-idle: #7d8271;
+  --icon-folder: #b0a86a;
+  --tag-bg: rgba(163, 209, 98, 0.14);
+  --tag-ink: #a3d162;
+  --thumb: #3a3f2f;
+  --input-focus: #6f8a4a;
+  --overlay: rgba(0, 0, 0, 0.62);
+  --foot: #1a1d15;
+  --spotlight: rgba(163, 209, 98, 0.16);
 }
 
 * { box-sizing: border-box; }
@@ -107,7 +145,7 @@ svg {
   cursor: pointer;
 }
 
-.ghost-btn:hover { background: #f4f4ee; }
+.ghost-btn:hover { background: var(--hover); }
 
 .icon-btn {
   width: 30px;
@@ -122,7 +160,7 @@ svg {
   cursor: pointer;
 }
 
-.icon-btn:hover { background: #f1f1ea; color: var(--ink-light); }
+.icon-btn:hover { background: var(--hover-soft); color: var(--ink-light); }
 
 .icon-btn.spin svg { animation: spin 0.9s linear infinite; }
 
@@ -140,22 +178,22 @@ svg {
   gap: 8px;
   border-radius: 6px;
   font-size: 13px;
-  color: #45483d;
+  color: var(--row-ink);
 }
 
 .tree-row.dir { cursor: pointer; }
-.tree-row:hover { background: #f3f3ed; }
+.tree-row:hover { background: var(--hover-soft); }
 
 .tree-row .chev {
   width: 12px;
   height: 12px;
-  color: #a9ada1;
+  color: var(--icon-idle);
   transition: transform 0.15s ease;
 }
 
 .tree-row.open .chev { transform: rotate(90deg); }
-.tree-row svg.folder { color: #b0a86a; }
-.tree-row svg.file { color: #a9ada1; }
+.tree-row svg.folder { color: var(--icon-folder); }
+.tree-row svg.file { color: var(--icon-idle); }
 
 .tree-name {
   flex: 1;
@@ -165,7 +203,7 @@ svg {
 }
 
 .tree-meta {
-  color: #a9ada1;
+  color: var(--icon-idle);
   font-size: 11px;
   font-family: var(--mono);
 }
@@ -180,8 +218,8 @@ svg {
 .repo-tag {
   padding: 1px 5px;
   border-radius: 4px;
-  background: #eef4e0;
-  color: #6d8340;
+  background: var(--tag-bg);
+  color: var(--tag-ink);
   font-size: 10.5px;
   flex: none;
 }
@@ -192,7 +230,7 @@ svg {
   flex: none;
   padding: 12px 14px 14px;
   border-top: 1px solid var(--line-light);
-  background: #fafaf6;
+  background: var(--foot);
 }
 
 .contact-title {
@@ -232,8 +270,8 @@ svg {
 .contact-panel.spotlight { animation: spotlight 1.4s ease; }
 
 @keyframes spotlight {
-  0% { background: #eef4e0; }
-  100% { background: #fafaf6; }
+  0% { background: var(--spotlight); }
+  100% { background: var(--foot); }
 }
 
 /* ---------- 右侧 Git 面板 ---------- */
@@ -295,6 +333,13 @@ svg {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
+
+.nav-icon { padding: 0 8px; }
+
+.nav-icon .ico-sun { display: none; }
+
+html[data-theme="dark"] .nav-icon .ico-sun { display: block; }
+html[data-theme="dark"] .nav-icon .ico-moon { display: none; }
 
 .panel-title {
   display: flex;
@@ -649,7 +694,7 @@ svg {
   z-index: 40;
   display: grid;
   place-items: center;
-  background: rgba(24, 26, 18, 0.45);
+  background: var(--overlay);
 }
 
 .modal[hidden] { display: none; }
@@ -692,7 +737,9 @@ svg {
   outline: none;
 }
 
-.picker-input input:focus { border-color: #b6c894; }
+.picker-input input:focus { border-color: var(--input-focus); }
+
+.picker-input input::placeholder { color: var(--muted-light); }
 
 .picker-list {
   max-height: 300px;
@@ -709,8 +756,8 @@ svg {
   cursor: pointer;
 }
 
-.picker-row:hover { background: #f4f4ee; }
-.picker-row svg { color: #b0a86a; }
+.picker-row:hover { background: var(--hover); }
+.picker-row svg { color: var(--icon-folder); }
 .picker-row .tree-name { font-family: var(--mono); font-size: 12.5px; }
 
 .picker-empty {
@@ -753,7 +800,7 @@ svg {
 
 .tree::-webkit-scrollbar-thumb,
 .picker-list::-webkit-scrollbar-thumb {
-  background: #d8d8d0;
+  background: var(--thumb);
   border: 3px solid transparent;
   background-clip: content-box;
   border-radius: 999px;
