@@ -402,6 +402,33 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && !$('modal').hidden) closePicker();
 });
 
+/* ---------- 联系我 ---------- */
+
+let copyTimer = null;
+
+$('navContact').addEventListener('click', () => {
+  const panel = $('contactPanel');
+  panel.classList.remove('spotlight');
+  void panel.offsetWidth;
+  panel.classList.add('spotlight');
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+});
+
+$('btnCopyMail').addEventListener('click', async () => {
+  const label = $('copyLabel');
+  let copied = true;
+  try {
+    await navigator.clipboard.writeText($('contactMail').textContent.trim());
+  } catch {
+    copied = false;
+  }
+  label.textContent = copied ? '已复制' : '复制失败';
+  clearTimeout(copyTimer);
+  copyTimer = setTimeout(() => {
+    label.textContent = '复制';
+  }, 1600);
+});
+
 $('autoToggle').addEventListener('change', (event) => {
   state.auto = event.target.checked;
   updateHeader();
