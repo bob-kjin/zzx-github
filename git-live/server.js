@@ -278,6 +278,169 @@ async function initRepo(dir) {
   };
 }
 
+/* ---------- 提交历史 ---------- */
+
+const COMMIT_LIMIT = 80;
+const HASH_RE = /^[0-9a-fA-F]{7,40}$/;
+
+const FILE_LABELS = {
+  A: '新增',
+  M: '修改',
+  D: '删除',
+  R: '重命名',
+  C: '复制',
+  T: '类型变更',
+  U: '冲突',
+};
+
+function parseRefs(raw, localBranches, remotes) {
+  if (!raw) return [];
+  return raw
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      if (part.startsWith('tag: ')) return { name: part.slice(5), head: false, kind: 'tag' };
+      if (part.startsWith('HEAD -> ')) return { name: part.slice(8), head: true, kind: 'branch' };
+      if (part === 'HEAD') return { name: 'HEAD', head: true, kind: 'head' };
+      if (!localBranches.has(part) && remotes.some((r) => part.startsWith(`${r}/`))) {
+        return { name: part, head: false, kind: 'remote' };
+      }
+      return { name: part, head: false, kind: localBranches.has(part) ? 'branch' : 'ref' };
+    });
+}
+
+async function refContext(dir) {
+  const branches = await runGit(['branch', '--format=%(refname:short)'], dir);
+  const remotes = await runGit(['remote'], dir);
+  return {
+    localBranches: new Set(branches.stdout.split('\n').map((s) => s.trim()).filter(Boolean)),
+    remotes: remotes.stdout.split('\n').map((s) => s.trim()).filter(Boolean),
+  };
+}
+
+async function collectCommits(dir, limit) {
+  const inside = await runGit(['rev-parse', '--is-inside-work-tree'], dir);
+  if (!inside.ok || inside.stdout.trim() !== 'true') {
+    return { ok: true, isRepo: false, commits: [], total: 0 };
+  }
+
+  const fmt = '%H%x1f%h%x1f%P%x1f%an%x1f%ae%x1f%cI%x1f%ar%x1f%D%x1f%s';
+  const log = await runGit(['log', `--max-count=${limit}`, '--date-order', `--pretty=format:${fmt}`], dir);
+  if (!log.ok) {
+    return { ok: true, isRepo: true, commits: [], total: 0, empty: true };
+  }
+
+  const { localBranches, remotes } = await refContext(dir);
+  const commits = log.stdout
+    .split('\n')
+    .filter((line) => line.trim())
+    .map((line) => {
+      const fields = line.split('\x1f');
+      const parents = (fields[2] || '').trim();
+      return {
+        hash: fields[0],
+        short: fields[1],
+        parents: parents ? parents.split(/\s+/) : [],
+        author: fields[3],
+        email: fields[4],
+        date: fields[5],
+        relative: fields[6],
+        refs: parseRefs(fields[7], localBranches, remotes),
+        subject: fields[8] || '',
+      };
+    });
+
+  const count = await runGit(['rev-list', '--count', 'HEAD'], dir);
+  return {
+    ok: true,
+    isRepo: true,
+    commits,
+    total: count.ok ? Number(count.stdout.trim()) || commits.length : commits.length,
+    limit,
+  };
+}
+
+function parseNameStatus(raw) {
+  const files = [];
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    const parts = line.split('\t');
+    const code = (parts[0] || 'M')[0];
+    // 重命名/复制会多出一列原路径，取最后一列作为当前路径
+    const filePath = parts.length > 2 ? parts[parts.length - 1] : parts[1];
+    files.push({ path: filePath || '', code, label: FILE_LABELS[code] || '变更' });
+  }
+  return files;
+}
+
+function parseNumstat(raw) {
+  const map = new Map();
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    const parts = line.split('\t');
+    const added = Number.parseInt(parts[0], 10);
+    const deleted = Number.parseInt(parts[1], 10);
+    map.set(parts[parts.length - 1] || '', {
+      added: Number.isNaN(added) ? 0 : added,
+      deleted: Number.isNaN(deleted) ? 0 : deleted,
+    });
+  }
+  return map;
+}
+
+// 合并提交用 diff-tree 拿不到内容，退回与第一父比较
+async function changedFiles(dir, hash, isMerge, mode) {
+  const direct = await runGit(['diff-tree', '-r', '--no-commit-id', `--${mode}`, '--root', hash], dir);
+  if (!isMerge || direct.stdout.trim()) return direct.stdout;
+  const fallback = await runGit(['diff', `--${mode}`, `${hash}^1`, hash], dir);
+  return fallback.stdout;
+}
+
+async function collectCommitDetail(dir, hash) {
+  if (!HASH_RE.test(hash)) return { ok: false, error: '提交哈希格式不正确' };
+
+  const fmt = '%H%x1f%h%x1f%P%x1f%an%x1f%ae%x1f%cI%x1f%ar%x1f%D%x1f%s%x1f%b';
+  const meta = await runGit(['log', '-1', `--pretty=format:${fmt}`, hash], dir);
+  if (!meta.ok || !meta.stdout.trim()) {
+    return { ok: false, error: meta.stderr || '找不到这个提交' };
+  }
+
+  const fields = meta.stdout.split('\x1f');
+  const parents = (fields[2] || '').trim();
+  const parentList = parents ? parents.split(/\s+/) : [];
+  const isMerge = parentList.length > 1;
+
+  const statusOut = await changedFiles(dir, hash, isMerge, 'name-status');
+  const numstatOut = await changedFiles(dir, hash, isMerge, 'numstat');
+  const stats = parseNumstat(numstatOut);
+
+  const files = parseNameStatus(statusOut).map((file) => {
+    const stat = stats.get(file.path) || { added: 0, deleted: 0 };
+    return { ...file, added: stat.added, deleted: stat.deleted };
+  });
+
+  return {
+    ok: true,
+    root: (await runGit(['rev-parse', '--show-toplevel'], dir)).stdout.trim() || dir,
+    hash: fields[0],
+    short: fields[1],
+    parents: parentList,
+    author: fields[3],
+    email: fields[4],
+    date: fields[5],
+    relative: fields[6],
+    refs: parseRefs(fields[7], new Set(), []),
+    subject: fields[8] || '',
+    body: (fields[9] || '').trim(),
+    isMerge,
+    files,
+    filesChanged: files.length,
+    insertions: files.reduce((sum, file) => sum + file.added, 0),
+    deletions: files.reduce((sum, file) => sum + file.deleted, 0),
+  };
+}
+
 function sendJson(res, payload, code = 200) {
   const body = JSON.stringify(payload);
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -332,10 +495,22 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/tree') return sendJson(res, await listChildren(target));
     if (url.pathname === '/api/browse') return sendJson(res, await browse(dirParam));
     if (url.pathname === '/api/default') return sendJson(res, { ok: true, dir: DEFAULT_DIR });
+    if (url.pathname === '/api/commits') {
+      const raw = Number(url.searchParams.get('limit')) || COMMIT_LIMIT;
+      const limit = Math.min(Math.max(raw, 1), 200);
+      return sendJson(res, await collectCommits(target, limit));
+    }
+    if (url.pathname === '/api/commit') {
+      return sendJson(res, await collectCommitDetail(target, url.searchParams.get('hash') || ''));
+    }
     if (url.pathname === '/api/init' && req.method === 'POST') {
       const body = await readBody(req);
       const initTarget = body.dir ? path.resolve(body.dir) : DEFAULT_DIR;
       return sendJson(res, await initRepo(initTarget));
+    }
+    if (url.pathname === '/favicon.ico') {
+      res.writeHead(204);
+      return res.end();
     }
     return serveStatic(url.pathname, res);
   } catch (error) {

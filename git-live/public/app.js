@@ -6,6 +6,17 @@ const state = {
   auto: true,
   timer: null,
   loading: true,
+  view: 'status',
+  history: {
+    commits: [],
+    rows: [],
+    total: 0,
+    gutter: 40,
+    sig: '',
+    loaded: false,
+    expanded: null,
+    detail: null,
+  },
 };
 
 const picker = { dir: '' };
@@ -249,7 +260,7 @@ function updateHeader() {
   $('liveDot').classList.toggle('idle', !state.auto);
 }
 
-function renderPanel() {
+function render() {
   const body = $('panelBody');
   const status = state.status;
 
@@ -273,28 +284,289 @@ function renderPanel() {
     if (button) button.addEventListener('click', initRepo);
     return;
   }
-  body.innerHTML = repoHtml(status);
+  if (state.view === 'history') renderHistory();
+  else body.innerHTML = repoHtml(status);
 }
 
 /* ---------- 数据刷新 ---------- */
 
 async function refreshStatus() {
   if (!state.dir) return;
-  const button = $('btnRefresh');
-  button.classList.add('spin');
-
   const status = await api(`/api/status?dir=${encodeURIComponent(state.dir)}`);
   state.status = status;
   state.loading = false;
 
-  button.classList.remove('spin');
   $('stamp').textContent = `更新于 ${clock(new Date())}`;
   updateHeader();
-  renderPanel();
+  render();
+}
+
+/* ---------- 提交历史 ---------- */
+
+const VIEW_KEY = 'git-live-view';
+const HIST_ROW_H = 56;
+const LANE_W = 14;
+
+// 经典泳道算法：为每个提交分配一条竖线，分叉/合并时开新泳道
+function layoutGraph(commits) {
+  const lanes = [];
+  const rows = [];
+
+  commits.forEach((commit, index) => {
+    let lane = lanes.indexOf(commit.hash);
+    if (lane === -1) {
+      lane = lanes.indexOf(null);
+      if (lane === -1) {
+        lane = lanes.length;
+        lanes.push(null);
+      }
+    }
+
+    const above = lanes.map((value, i) => (value ? i : -1)).filter((i) => i >= 0);
+
+    // 第一个父提交接在当前泳道；若已有别的泳道在等它，当前泳道到此为止并汇入那条
+    const first = commit.parents[0] || null;
+    if (first && lanes.indexOf(first) === -1) lanes[lane] = first;
+    else lanes[lane] = null;
+
+    for (let i = 1; i < commit.parents.length; i += 1) {
+      if (lanes.indexOf(commit.parents[i]) === -1) {
+        let slot = lanes.indexOf(null);
+        if (slot === -1) {
+          slot = lanes.length;
+          lanes.push(null);
+        }
+        lanes[slot] = commit.parents[i];
+      }
+    }
+
+    rows.push({
+      index,
+      lane,
+      above,
+      below: lanes.map((value, i) => (value ? i : -1)).filter((i) => i >= 0),
+      parentLanes: commit.parents.map((parent) => lanes.indexOf(parent)).filter((i) => i >= 0),
+    });
+
+    while (lanes.length && lanes[lanes.length - 1] === null) lanes.pop();
+  });
+
+  let laneCount = 1;
+  for (const row of rows) {
+    laneCount = Math.max(laneCount, row.lane + 1);
+    for (const lane of row.above) laneCount = Math.max(laneCount, lane + 1);
+    for (const lane of row.below) laneCount = Math.max(laneCount, lane + 1);
+  }
+  return { rows, laneCount };
+}
+
+// 每行一个覆盖整条记录的 SVG，展开详情时竖线也跟着延长
+function drawGraph(item, row, gutter) {
+  const svg = item.querySelector('.hist-graph');
+  if (!svg || !row) return;
+
+  const height = item.offsetHeight;
+  const mid = HIST_ROW_H / 2;
+  const xOf = (lane) => 9 + lane * LANE_W;
+  const nodeX = xOf(row.lane);
+  const parts = [];
+
+  const lanes = new Set([...row.above, ...row.below, row.lane]);
+  for (const lane of lanes) {
+    const lx = xOf(lane);
+    if (lane === row.lane) {
+      if (row.above.includes(lane)) parts.push(`<line x1="${lx}" y1="0" x2="${lx}" y2="${mid}"/>`);
+      if (row.below.includes(lane)) parts.push(`<line x1="${lx}" y1="${mid}" x2="${lx}" y2="${height}"/>`);
+      continue;
+    }
+    parts.push(`<line x1="${lx}" y1="0" x2="${lx}" y2="${height}"/>`);
+  }
+
+  for (const parentLane of row.parentLanes) {
+    if (parentLane === row.lane) continue;
+    const px = xOf(parentLane);
+    parts.push(`<path d="M ${nodeX} ${mid} C ${nodeX} ${mid + 14}, ${px} ${HIST_ROW_H - 14}, ${px} ${HIST_ROW_H}"/>`);
+  }
+
+  const commit = state.history.commits[row.index] || { refs: [] };
+  const isHead = commit.refs.some((ref) => ref.head);
+  parts.push(`<circle class="hist-node${isHead ? ' head' : ''}" cx="${nodeX}" cy="${mid}" r="4"/>`);
+
+  svg.setAttribute('viewBox', `0 0 ${gutter} ${height}`);
+  svg.setAttribute('width', gutter);
+  svg.setAttribute('height', height);
+  // 全局 svg 规则会把尺寸压成 15px，这里用内联样式覆盖
+  svg.style.width = `${gutter}px`;
+  svg.style.height = `${height}px`;
+  svg.innerHTML = parts.join('');
+}
+
+function refChip(ref) {
+  const label = ref.head && ref.kind !== 'head' ? `${ref.name} ← HEAD` : ref.name;
+  return `<span class="ref-chip ${esc(ref.kind)}${ref.head ? ' head' : ''}">${esc(label)}</span>`;
+}
+
+function histDetailHtml() {
+  const detail = state.history.detail;
+  if (!detail || !detail.data) {
+    return '<div class="hist-detail"><div class="hist-note">正在读取这次提交的改动…</div></div>';
+  }
+
+  const data = detail.data;
+  if (!data.ok) {
+    return `<div class="hist-detail"><div class="error-box">${esc(data.error || '无法读取这次提交')}</div></div>`;
+  }
+
+  const files = data.files.length
+    ? data.files
+        .map(
+          (file) => `<div class="hist-file">
+        <span class="hist-file-name" title="${esc(file.path)}">${esc(file.path)}</span>
+        <span class="hist-file-stat">+${file.added} −${file.deleted}</span>
+        <span class="tag tag-${esc(file.code)}">${esc(file.label)}</span>
+      </div>`,
+        )
+        .join('')
+    : '<div class="hist-note">这次提交没有文件改动。</div>';
+
+  return `<div class="hist-detail">
+    <div class="hist-detail-subject">${esc(data.subject)}</div>
+    <div class="hist-detail-meta">
+      <span class="hash">${esc(data.short)}</span>
+      <span>${esc(data.author)}</span>
+      <span>${esc(shortDate(data.date))}</span>
+      ${data.isMerge ? '<span>合并提交</span>' : ''}
+    </div>
+    <div class="hist-detail-summary">
+      ${data.filesChanged} 个文件 · <span class="add">+${data.insertions}</span> <span class="del">−${data.deletions}</span>
+    </div>
+    <div class="hist-files">${files}</div>
+  </div>`;
+}
+
+function renderHistory() {
+  const body = $('panelBody');
+  const hist = state.history;
+
+  if (!hist.commits.length) {
+    body.innerHTML = `<div class="hist-head"><b>提交历史</b><span>${hist.total} 个提交</span></div>
+      <div class="hist-note">${hist.loaded ? '这个仓库还没有任何提交。' : '正在读取提交历史…'}</div>`;
+    return;
+  }
+
+  const items = hist.commits
+    .map((commit, index) => {
+      const open = hist.expanded === commit.hash;
+      const meta = [
+        ...commit.refs.map(refChip),
+        `<span class="hist-hash">${esc(commit.short)}</span>`,
+        `<span class="hist-hash">${esc(relTime(commit.date))}</span>`,
+      ].join('');
+      return `<div class="hist-item${open ? ' open' : ''}" data-index="${index}" data-hash="${esc(commit.hash)}">
+        <svg class="hist-graph" aria-hidden="true"></svg>
+        <div class="hist-body" role="button" tabindex="0" aria-expanded="${open}">
+          <div class="hist-subject">${esc(commit.subject)}</div>
+          <div class="hist-meta">${meta}</div>
+        </div>
+        ${open ? histDetailHtml() : ''}
+      </div>`;
+    })
+    .join('');
+
+  body.innerHTML = `<div class="hist-head"><b>提交历史</b><span>${hist.total} 个提交</span></div>
+    <div class="hist-list" id="histList" style="--gutter:${hist.gutter}px">${items}</div>`;
+
+  const list = $('histList');
+  list.querySelectorAll('.hist-item').forEach((item) => {
+    drawGraph(item, hist.rows[Number(item.dataset.index)], hist.gutter);
+  });
+}
+
+function commitsSignature(commits) {
+  return commits
+    .map((commit) => `${commit.hash}|${commit.refs.map((ref) => ref.name + (ref.head ? '*' : '')).join(',')}`)
+    .join(';');
+}
+
+async function refreshHistory(force) {
+  if (!state.dir || !state.status || !state.status.isRepo) return;
+
+  const data = await api(`/api/commits?dir=${encodeURIComponent(state.dir)}`);
+  if (!data.ok) return;
+
+  const commits = data.commits || [];
+  const sig = commitsSignature(commits);
+  const changed = sig !== state.history.sig;
+
+  state.history.commits = commits;
+  state.history.total = data.total || 0;
+  state.history.loaded = true;
+  $('stamp').textContent = `更新于 ${clock(new Date())}`;
+
+  if (!changed && !force) return;
+
+  state.history.sig = sig;
+  const { rows, laneCount } = layoutGraph(commits);
+  state.history.rows = rows;
+  state.history.gutter = 16 + laneCount * LANE_W;
+
+  if (state.history.expanded && !commits.some((commit) => commit.hash === state.history.expanded)) {
+    state.history.expanded = null;
+    state.history.detail = null;
+  }
+  if (state.view === 'history') renderHistory();
+}
+
+async function toggleCommit(hash) {
+  if (state.history.expanded === hash) {
+    state.history.expanded = null;
+    state.history.detail = null;
+    renderHistory();
+    return;
+  }
+
+  state.history.expanded = hash;
+  state.history.detail = { hash, data: null };
+  renderHistory();
+
+  const data = await api(`/api/commit?dir=${encodeURIComponent(state.dir)}&hash=${encodeURIComponent(hash)}`);
+  if (state.history.expanded !== hash) return;
+  state.history.detail = { hash, data };
+  renderHistory();
+}
+
+function setView(view) {
+  state.view = view === 'history' ? 'history' : 'status';
+  try {
+    localStorage.setItem(VIEW_KEY, state.view);
+  } catch {
+    // 隐私模式下 localStorage 不可用，仅本次会话生效
+  }
+
+  const isHistory = state.view === 'history';
+  $('tabStatus').classList.toggle('active', !isHistory);
+  $('tabHistory').classList.toggle('active', isHistory);
+  $('tabStatus').setAttribute('aria-selected', String(!isHistory));
+  $('tabHistory').setAttribute('aria-selected', String(isHistory));
+
+  render();
+  if (isHistory) refreshHistory(true);
 }
 
 async function refreshAll() {
   await Promise.all([refreshStatus(), loadTree()]);
+  if (state.view === 'history') await refreshHistory(true);
+}
+
+async function refreshActive() {
+  const button = $('btnRefresh');
+  button.classList.add('spin');
+  try {
+    if (state.view === 'history') await refreshHistory(true);
+    else await refreshAll();
+  } finally {
+    button.classList.remove('spin');
+  }
 }
 
 async function initRepo() {
@@ -364,7 +636,25 @@ function closePicker() {
 
 $('btnPick').addEventListener('click', openPicker);
 $('btnTree').addEventListener('click', loadTree);
-$('btnRefresh').addEventListener('click', refreshAll);
+$('btnRefresh').addEventListener('click', refreshActive);
+$('tabStatus').addEventListener('click', () => setView('status'));
+$('tabHistory').addEventListener('click', () => setView('history'));
+
+$('panelBody').addEventListener('click', (event) => {
+  const body = event.target.closest('.hist-body');
+  if (!body) return;
+  const item = body.closest('.hist-item');
+  if (item) toggleCommit(item.dataset.hash);
+});
+
+$('panelBody').addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  const body = event.target.closest('.hist-body');
+  if (!body) return;
+  event.preventDefault();
+  const item = body.closest('.hist-item');
+  if (item) toggleCommit(item.dataset.hash);
+});
 $('modalClose').addEventListener('click', closePicker);
 
 $('modal').addEventListener('click', (event) => {
@@ -470,7 +760,7 @@ $('autoToggle').addEventListener('change', (event) => {
   state.auto = event.target.checked;
   updateHeader();
   if (state.auto) {
-    refreshStatus();
+    refreshActive();
     startTimer();
   } else {
     clearInterval(state.timer);
@@ -481,18 +771,34 @@ $('autoToggle').addEventListener('change', (event) => {
 function startTimer() {
   clearInterval(state.timer);
   state.timer = setInterval(() => {
-    if (state.auto && !document.hidden && $('modal').hidden) refreshStatus();
+    if (!state.auto || document.hidden || !$('modal').hidden) return;
+    if (state.view === 'history') refreshHistory(false);
+    else refreshStatus();
   }, 3000);
 }
 
 async function boot() {
-  const fromUrl = new URLSearchParams(window.location.search).get('dir');
+  const params = new URLSearchParams(window.location.search);
+  const fromUrl = params.get('dir');
   if (fromUrl) {
     state.dir = fromUrl;
   } else {
     const info = await api('/api/default');
     state.dir = info.dir || '';
   }
+
+  let saved = 'status';
+  try {
+    saved = localStorage.getItem(VIEW_KEY) === 'history' ? 'history' : 'status';
+  } catch {
+    saved = 'status';
+  }
+  state.view = saved;
+  $('tabStatus').classList.toggle('active', saved === 'status');
+  $('tabHistory').classList.toggle('active', saved === 'history');
+  $('tabStatus').setAttribute('aria-selected', String(saved === 'status'));
+  $('tabHistory').setAttribute('aria-selected', String(saved === 'history'));
+
   await refreshAll();
   startTimer();
 }

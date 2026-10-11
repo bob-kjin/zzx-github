@@ -18,6 +18,8 @@
   --overlay: rgba(24, 26, 18, 0.45);
   --foot: #fafaf6;
   --spotlight: #eef4e0;
+  --graph-line: rgba(255, 255, 255, 0.22);
+  --graph-node: #8b9080;
 
   --panel: #23261e;
   --panel-soft: rgba(255, 255, 255, 0.045);
@@ -450,6 +452,232 @@ html[data-theme="dark"] .nav-icon .ico-moon { display: none; }
   font-size: 11px;
   color: #7e8274;
   font-family: var(--mono);
+}
+
+/* ---------- 面板视图切换 ---------- */
+
+.panel-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 20px 0;
+  border-bottom: 1px solid var(--panel-line);
+}
+
+.tab-btn {
+  height: 30px;
+  padding: 0 12px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.tab-btn:hover { color: var(--text); }
+
+.tab-btn.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.tab-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* ---------- 提交历史 ---------- */
+
+.hist-head {
+  margin-bottom: 10px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.hist-head b {
+  color: #c3c7b8;
+  font-weight: 500;
+}
+
+.hist-list { --gutter: 40px; }
+
+.hist-item { position: relative; }
+
+.hist-graph {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+}
+
+.hist-graph line,
+.hist-graph path {
+  stroke: var(--graph-line);
+  stroke-width: 2;
+  fill: none;
+}
+
+.hist-node {
+  fill: var(--panel);
+  stroke: var(--graph-node);
+  stroke-width: 2;
+}
+
+.hist-node.head {
+  fill: var(--accent);
+  stroke: var(--accent);
+}
+
+.hist-body {
+  height: 56px;
+  margin-left: var(--gutter);
+  padding: 6px 9px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.hist-body:hover { background: rgba(255, 255, 255, 0.04); }
+
+.hist-item.open .hist-body { background: rgba(255, 255, 255, 0.07); }
+
+.hist-subject {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.hist-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ref-chip {
+  padding: 1px 7px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.09);
+  color: #cfd3c4;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.ref-chip.head {
+  background: rgba(163, 209, 98, 0.16);
+  color: var(--accent);
+}
+
+.ref-chip.tag {
+  background: rgba(224, 163, 90, 0.16);
+  color: var(--amber);
+}
+
+.ref-chip.remote {
+  background: rgba(143, 182, 216, 0.16);
+  color: #8fb6d8;
+}
+
+.hist-hash {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+.hist-detail {
+  margin: 2px 0 12px var(--gutter);
+  padding: 12px;
+  border-radius: 8px;
+  border-left: 2px solid rgba(163, 209, 98, 0.4);
+  background: var(--panel-soft);
+}
+
+.hist-detail-subject {
+  font-size: 13px;
+  word-break: break-word;
+}
+
+.hist-detail-meta {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.hist-detail-summary {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.hist-detail-summary .add { color: var(--accent); }
+.hist-detail-summary .del { color: var(--red); }
+
+.hist-files {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hist-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  border-radius: 5px;
+  font-size: 12px;
+}
+
+.hist-file:hover { background: rgba(255, 255, 255, 0.04); }
+
+.hist-file-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: #d3d6c8;
+}
+
+.hist-file-stat {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+.tag {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10.5px;
+}
+
+.tag-A { background: rgba(163, 209, 98, 0.16); color: var(--accent); }
+.tag-M { background: rgba(224, 163, 90, 0.16); color: var(--amber); }
+.tag-D { background: rgba(224, 122, 106, 0.16); color: var(--red); }
+.tag-R, .tag-C { background: rgba(143, 182, 216, 0.16); color: #8fb6d8; }
+.tag-T, .tag-U { background: rgba(255, 255, 255, 0.1); color: #c3c7b8; }
+
+.hist-note {
+  padding: 6px;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 /* ---------- 空状态 ---------- */
